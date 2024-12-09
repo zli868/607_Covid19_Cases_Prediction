@@ -1,0 +1,520 @@
+---
+title: "607_Final"
+author: "zeren li"
+date: "`r Sys.Date()`"
+output: html_document
+bibliography: Reference.bib
+nocite: |
+  @guidotti2022
+---
+
+# Was vaccination rate effectively prevent the pandemic? Are there other factors?
+
+## Data loading and cleaning
+
+Initial guess: Yes. But there are other factors like the appearance of variants of the virus might lower the effectiveness of the the vaccination rate. First we will investigate this at the country level, then will randomly choose some states to validate this assumption.
+
+```{R}
+# Load necessary libraries
+library(COVID19)
+library(dplyr)
+
+# Load the dataset
+df_1 <- covid19(level = 1)
+cleaned_df_1 <- df_1 |>
+  select(id, date, confirmed, deaths, people_vaccinated, people_fully_vaccinated, population,
+         administrative_area_level_1) |>
+  filter(
+    administrative_area_level_1 == 'United States',
+    !is.na(date),
+    between(as.Date(date), as.Date("2020-03-01"), as.Date("2022-03-01"))
+  ) |>
+  mutate(
+    confirmed = ifelse(is.na(confirmed), 0.0, confirmed),
+    deaths = ifelse(is.na(deaths), 0.0, deaths),
+    people_vaccinated = ifelse(is.na(people_vaccinated), 0.0, people_vaccinated),
+    people_fully_vaccinated = ifelse(is.na(people_fully_vaccinated), 0.0, people_fully_vaccinated)
+  )
+
+# Convert counts to per 100,000 population
+# and add two new columns
+
+cleaned_df_1 <- cleaned_df_1 |>
+  mutate(
+    vaccination_rate = people_vaccinated / population,
+    confirmed = confirmed / 100000,
+    deaths = deaths / 100000,
+    people_vaccinated = people_vaccinated / 100000,
+    people_fully_vaccinated = people_fully_vaccinated / 100000,
+    population = population / 100000,
+    new_cases = c(0, diff(confirmed))
+  )
+
+# Add the 'variant' column based on historical data
+cleaned_df_1 <- cleaned_df_1 |>
+  mutate(
+    variant = case_when(
+      date >= as.Date("2020-03-01") & date <= as.Date("2021-01-31") ~ 0,  # Original Strain
+      date >= as.Date("2021-02-01") & date <= as.Date("2021-05-31") ~ 1,  # Alpha
+      date >= as.Date("2021-06-01") & date <= as.Date("2021-11-30") ~ 2,  # Delta
+      date >= as.Date("2021-12-01") & date <= as.Date("2022-03-01") ~ 3   # Omicron
+    )
+  )
+
+
+View(cleaned_df_1)
+#glimpse(cleaned_df_1)
+
+```
+
+Now we can make a scatterplot showing the relationship between the vaccination and confirmed cases, death, new cases.
+
+```{R}
+library(ggplot2)
+
+# Scatterplots to visualize relationships between vaccination rates, confirmed rates, and death rates, new cases rates
+
+ggplot(cleaned_df_1, aes(x = people_vaccinated, y = confirmed)) +
+  geom_point() +
+  labs(title = "People Vaccinated vs Confirmed Cases",
+       x = "People Vaccinated",
+       y = "Confirmed Cases") +
+  theme_minimal()
+
+ggplot(cleaned_df_1, aes(x = people_vaccinated, y = deaths)) +
+  geom_point() +
+  labs(title = "People Vaccinated vs Deaths",
+       x = "People Vaccinated",
+       y = "Deaths") +
+  theme_minimal()
+
+ggplot(cleaned_df_1, aes(x = people_vaccinated, y = new_cases)) +
+  geom_point() +
+  labs(title = "People Vaccinated vs New cases",
+       x = "People Vaccinated",
+       y = "New cases") +
+  theme_minimal()
+
+ggplot(cleaned_df_1, aes(x = people_fully_vaccinated, y = confirmed)) +
+  geom_point() +
+  labs(title = "People Fully Vaccinated vs Confirmed Cases",
+       x = "People Fully Vaccinated",
+       y = "Confirmed Cases") +
+  theme_minimal()
+
+ggplot(cleaned_df_1, aes(x = people_fully_vaccinated, y = deaths)) +
+  geom_point() +
+  labs(title = "People Fully Vaccinated vs Deaths",
+       x = "People Fully Vaccinated",
+       y = "Deaths") +
+  theme_minimal()
+
+ggplot(cleaned_df_1, aes(x = people_fully_vaccinated, y = new_cases)) +
+  geom_point() +
+  labs(title = "People Vaccinated vs New cases",
+       x = "People Fully Vaccinated",
+       y = "New cases") +
+  theme_minimal()
+
+```
+
+we used both people_fully_vaccinated, and people_vaccinated as the dependent variable. The graph shows that no matter which we choose as the dependent variable, the confirmed cases and death graph shows a "ladder". That is the cases will quickly go up first, and then stay steady at some point, and then go up again at the end.
+
+Below is a 3d plot of the relashionship between the confirmed cases, deaths, and people vaccinated. It's just a combination of the 2d scatterplot of deaths and people vaccinated, and confirmed cases and people vaccinated.
+
+```{R}
+library(plotly)
+
+# 3D Scatterplot to visualize the relationship between confirmed cases, deaths, and people vaccinated
+plot_ly(cleaned_df_1, x = ~people_vaccinated, y = ~confirmed, z = ~deaths, type = 'scatter3d', mode = 'markers') %>%
+  layout(title = "3D Scatterplot of People Vaccinated, Confirmed Cases, and Deaths",
+         scene = list(
+           xaxis = list(title = 'People Vaccinated'),
+           yaxis = list(title = 'Confirmed Cases'),
+           zaxis = list(title = 'Deaths')
+         ))
+```
+
+To investigate this further, we can highlight those points for start of each month.
+
+```{R}
+# Scatterplots to visualize relationships between vaccination rates, confirmed rates, and death rates
+# Highlighting points for start of each month
+highlight_dates <- seq(as.Date("2020-03-01"), as.Date("2022-03-01"), by = "month")
+
+cleaned_data_highlight <- cleaned_df_1 %>%
+  filter(as.Date(paste0(date, "-01"), "%Y-%m-%d") %in% highlight_dates)
+
+# People Vaccinated vs Confirmed Cases with only highlighted points and labels
+ggplot(cleaned_data_highlight, aes(x = people_vaccinated, y = confirmed)) +
+  geom_point(color = "red", size = 3) +
+  geom_text(aes(label = date), vjust = -1, color = "black", size = 3) +
+  labs(title = "People Vaccinated vs Confirmed Cases (Highlighted Points)",
+       x = "People Vaccinated",
+       y = "Confirmed Cases") +
+  theme_minimal()
+
+# People Vaccinated vs death with only highlighted points and labels
+ggplot(cleaned_data_highlight, aes(x = people_vaccinated, y = deaths)) +
+  geom_point(color = "red", size = 3) +
+  geom_text(aes(label = date), vjust = -1, color = "black", size = 3) +
+  labs(title = "People Vaccinated vs death (Highlighted Points)",
+       x = "People Vaccinated",
+       y = "Deaths") +
+  theme_minimal()
+
+# People Vaccinated vs new cases with only highlighted points and labels
+ggplot(cleaned_data_highlight, aes(x = people_vaccinated, y = new_cases)) +
+  geom_point(color = "red", size = 3) +
+  geom_text(aes(label = date), vjust = -1, color = "black", size = 3) +
+  labs(title = "People Vaccinated vs New cases (Highlighted Points)",
+       x = "People Vaccinated",
+       y = "New cases") +
+  theme_minimal()
+
+```
+
+From the cases of confirmed and cases of death, we saw even clearer that both cases go up first, but become flat at the end of the 2020 till the end of the 2021, after which the cases go up again. What makes it stopped accelerating the end of the 2020? And what makes it go up again at the end of the 2021?
+
+To see the trend more clearly. we can make time series plot for people vaccinated, fully vaccinated, confirmed, and deaths, new cases
+
+```{R}
+library(tidyr)
+# Time series plot for people vaccinated, fully vaccinated, confirmed, and deaths, new cases
+cleaned_df_1_long1 <- cleaned_df_1 |>
+  select(date, people_vaccinated, people_fully_vaccinated, confirmed) |>
+  pivot_longer(cols = c(people_vaccinated, people_fully_vaccinated, confirmed),
+               names_to = "variable1", values_to = "value1")
+#View(cleaned_df_1_long1)
+cleaned_df_1_long2 <- cleaned_df_1 |>
+  select(date, deaths, new_cases) |>
+  pivot_longer(cols = c(deaths, new_cases),
+               names_to = "variable2", values_to = "value2")
+#View(cleaned_df_1_long2)
+ggplot(cleaned_df_1_long1, aes(x = date, y = value1, color = variable1, group = variable1)) +
+  geom_line() +
+  labs(title = "Time Series of Vaccination, Confirmed Cases, and Deaths",
+       x = "Date (Year-Month)",
+       y = "Count per 100,000 people",
+       color = "Legend") +
+  scale_x_date(date_labels = "%Y-%m", date_breaks = "1 month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(cleaned_df_1_long2, aes(x = date, y = value2, color = variable2, group = variable2)) +
+  geom_line() +
+  labs(title = "Time Series of Deaths and New cases",
+       x = "Date (Year-Month)",
+       y = "Count per 100,000 people",
+       color = "Legend") +
+  scale_x_date(date_labels = "%Y-%m", date_breaks = "1 month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+From the first graph, the confirmed cases first raised and become flat at the end of the 2020. It raises again at the end of the 2021. the people vaccinated starts rising at the end of the 2020, and it quick surpass the number of cases. at the end of the 2021, around 4 out of 5 people in the united state has been vaccinated.
+
+From the second graph, In New cases against people Vaccinated, we saw that it first rising quickly and drops around 2020-12, and then go a little up around 2021-03, and then go down, and then go up around 2021-06, and then dropped, and then go up again in 2022-12.
+
+The reason lies not in the original dataset, because the original one doesn't include the appearance of the variants of the virus. But, we did.
+
+recall that from the history Original Strain: March 2020. Vaccination begins: Dec 2020 Alpha: Widespread in Spring 2021. Delta: June-July 2021. Omicron: December 2021-January 2022. Omicron Sub variants: Throughout 2022-2023.
+
+This is a perfect explanation of the pattern that we saw from the graph.
+
+Let's go over it once again.
+
+In March 2020, pandemic outbreaks. At the end of the 2020, vaccination was adopted. Despite the appearance of the alpha variants, the number of cases dropped, showing the effectiveness of the vaccination. However, we experience a sudden spike during each variants outbreak, namely from variants of Alpha, Delta, Omicron.
+
+Below is a regression of the new cases based only on vaccination.
+
+```{R}
+# Load necessary libraries
+library(tidymodels)
+library(dplyr)
+
+# Split the data into training and testing sets
+set.seed(123)
+data_split <- initial_split(cleaned_df_1, prop = 0.8)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+# Define the model
+linear_model <- linear_reg() %>%
+  set_engine("lm")
+
+# Create a recipe for preprocessing
+model_recipe <- recipe(confirmed ~ people_vaccinated, data = train_data)
+
+# Create the workflow
+model_workflow <- workflow() %>%
+  add_model(linear_model) %>%
+  add_recipe(model_recipe)
+
+# Train the model
+trained_model <- model_workflow %>%
+  fit(data = train_data)
+
+# Predict on the test data and calculate RMSE
+predictions <- predict(trained_model, test_data) %>%
+  bind_cols(test_data) %>%
+  mutate(residual = confirmed - .pred)
+#View(predictions)
+# Calculate RMSE
+rmse_value <- rmse(predictions, truth = confirmed, estimate = .pred)
+cat("RMSE: ", rmse_value$.estimate, "\n")
+
+# Generate prediction intervals
+model_lm <- pull_workflow_fit(trained_model)$fit
+
+# Predict with intervals on the test data
+prediction_intervals <- predict(model_lm, newdata = test_data, interval = "prediction", level = 0.95)
+
+# Combine the predictions with the actual values
+test_data_with_predictions <- test_data %>%
+  mutate(
+    predicted = prediction_intervals[, "fit"],
+    lower_pi = prediction_intervals[, "lwr"],
+    upper_pi = prediction_intervals[, "upr"]
+  )
+
+# View the results
+#View(prediction_intervals)
+
+# Plot the predictions with prediction intervals
+library(ggplot2)
+ggplot(test_data_with_predictions, aes(x = people_vaccinated)) +
+  geom_point(aes(y = confirmed), color = "blue", alpha = 0.6) +
+  geom_line(aes(y = predicted), color = "red") +
+  geom_ribbon(aes(ymin = lower_pi, ymax = upper_pi), alpha = 0.2, fill = "grey") +
+  labs(title = "Prediction of Confirmed Cases Based on People Vaccinated",
+       x = "People Vaccinated per 100,000",
+       y = "Confirmed Cases per 100,000") +
+  theme_minimal()
+
+```
+
+with RMSE: 79.18228. From the prediction interval you saw that by a 95% of confidence, our model is actually not a bad model. It followed the general trend of the new cases well. However, we also wants to incorporate the variants as a variable together with vaccination.
+
+```{R}
+library(caret)
+library(tidyr)
+library(broom)
+# Predict confirmed cases using variant and vaccination rate as predictors
+set.seed(123)
+
+# Split data into training and testing sets
+train_index <- createDataPartition(cleaned_df_1$confirmed, p = 0.8, list = FALSE)
+train_data <- cleaned_df_1[train_index, ]
+test_data <- cleaned_df_1[-train_index, ]
+
+# Train a linear model
+model <- lm(confirmed ~ variant + vaccination_rate, data = train_data)
+
+# Predict on test data
+predictions <- predict(model, newdata = test_data, interval = "prediction")
+
+# Calculate RMSE
+rmse <- sqrt(mean((test_data$confirmed - predictions[, "fit"])^2))
+#cat("RMSE: ", rmse, "\n")
+
+# Combine predictions with test data for visualization
+predicted_df <- cbind(test_data, predictions)
+
+# Plot predictions vs actual values
+ggplot(predicted_df, aes(x = date)) +
+  geom_line(aes(y = confirmed, color = "Actual cases")) +
+  geom_line(aes(y = fit, color = "Predicted cases")) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2, fill = "blue") +
+  labs(title = "Predicted vs Actual Confirmed Cases", y = "Confirmed Cases per 100,000", x = "Date") +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual cases" = "red", "Predicted cases" = "blue"))
+
+# Print model summary and RMSE
+#print(glance(model))
+summary(model)
+cat("RMSE: ", rmse, "\n")
+
+```
+
+From model: P-value is less than 2.2e-16, and so is statistically significant. RMSE is 73.679 which is lower than RMSE of using just vaccination which is 79.18228.
+
+From the interval you can also see the prediction is much closer to the trend of the actual data.
+
+## prediction made for some sample states
+
+next we will set level =2 and extract some sample states
+
+```{R}
+# Load the dataset
+df_2 <- covid19(level = 2)
+```
+
+```{R}
+cleaned_df_2 <- df_2 |>
+  select(id, date, confirmed, deaths, people_vaccinated, people_fully_vaccinated, population,
+         administrative_area_level_1, administrative_area_level_2) |>
+  filter(
+    administrative_area_level_1 == 'United States',
+    !is.na(date),
+    between(as.Date(date), as.Date("2020-03-01"), as.Date("2022-03-01"))
+  ) |>
+  mutate(
+    confirmed = ifelse(is.na(confirmed), 0.0, confirmed),
+    deaths = ifelse(is.na(deaths), 0.0, deaths),
+    people_vaccinated = ifelse(is.na(people_vaccinated), 0.0, people_vaccinated),
+    people_fully_vaccinated = ifelse(is.na(people_fully_vaccinated), 0.0, people_fully_vaccinated)
+  )
+
+# Convert counts to per 1,000 population  for level 2 dataset
+# and add two new columns
+cleaned_df_2 <- cleaned_df_2 |>
+  group_by(administrative_area_level_2) |>
+  mutate(
+    vaccination_rate = people_vaccinated / population,
+    confirmed = confirmed / 1000,
+    deaths = deaths / 1000,
+    people_vaccinated = people_vaccinated / 1000,
+    people_fully_vaccinated = people_fully_vaccinated / 1000,
+    new_cases = c(0, diff(confirmed)),
+    population = population / 1000
+  ) |>
+  ungroup()
+
+# Add the 'variant' column based on historical data
+cleaned_df_2 <- cleaned_df_2 |>
+  mutate(
+    variant = case_when(
+      date >= as.Date("2020-03-01") & date <= as.Date("2021-01-31") ~ 0,  # Original Strain
+      date >= as.Date("2021-02-01") & date <= as.Date("2021-05-31") ~ 1,  # Alpha
+      date >= as.Date("2021-06-01") & date <= as.Date("2021-11-30") ~ 2,  # Delta
+      date >= as.Date("2021-12-01") & date <= as.Date("2022-03-01") ~ 3   # Omicron
+    )
+  )
+
+
+View(cleaned_df_2)
+#glimpse(cleaned_df_1)
+
+
+
+```
+
+```{R}
+# Display all state names
+state_names <- unique(cleaned_df_2$administrative_area_level_2)
+print(state_names)
+
+```
+We will first conduct a regression model on California, using variant and vaccination rate as predictor to predict the confirmed.
+```{R}
+# Conduct regression model on California
+california_data <- cleaned_df_2 |>
+  filter(administrative_area_level_2 == 'California')
+
+# Split data into training and testing sets for California
+set.seed(123)
+train_index_ca <- createDataPartition(california_data$confirmed, p = 0.8, list = FALSE)
+train_data_ca <- california_data[train_index_ca, ]
+test_data_ca <- california_data[-train_index_ca, ]
+
+# Train a linear model for California
+model_ca <- lm(confirmed ~ variant + vaccination_rate, data = train_data_ca)
+summary(model_ca)
+
+# Predict on test data for California
+predictions_ca <- predict(model_ca, newdata = test_data_ca, interval = "prediction")
+
+# Calculate RMSE for California
+rmse_ca <- sqrt(mean((test_data_ca$confirmed - predictions_ca[, "fit"])^2))
+cat("RMSE for California: ", rmse_ca, "\n")
+
+# Combine predictions with test data for visualization
+predicted_df_ca <- cbind(test_data_ca, predictions_ca)
+
+```
+
+```{R}
+View(predicted_df_ca)
+```
+
+
+```{R}
+# Plot predictions vs actual values for California
+ggplot(predicted_df_ca, aes(x = date)) +
+  geom_line(aes(y = confirmed, color = "Actual")) +
+  geom_line(aes(y = fit, color = "Predicted")) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2, fill = "blue") +
+  labs(title = "Predicted vs Actual Confirmed Cases in California", y = "Confirmed Cases per 1,000", x = "Date") +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual" = "red", "Predicted" = "blue"))
+
+# Print model summary and RMSE for California
+summary(model_ca)
+cat("RMSE for California: ", rmse_ca, "\n")
+```
+Again, P-value is less than 2.2e-16. And the RMSE is around 900. 
+As we saw from the graph, Prediction follows well with the actual data.
+
+## Next, using regression model of california to predict other states. Namely, Maryland and New York.
+
+```{R}
+# Predict confirmed cases for Maryland and New York using the California model
+maryland_data <- cleaned_df_2 |>
+  filter(administrative_area_level_2 == 'Maryland')
+new_york_data <- cleaned_df_2 |>
+  filter(administrative_area_level_2 == 'New York')
+```
+
+```{R}
+# Predict for Maryland
+predictions_md <- predict(model_ca, newdata = maryland_data, interval = "prediction")
+rmse_md <- sqrt(mean((maryland_data$confirmed - predictions_md[, "fit"])^2))
+cat("RMSE for Maryland: ", rmse_md, "\n")
+predicted_df_md <- cbind(maryland_data, predictions_md)
+```
+
+```{R}
+# Plot predictions vs actual values for Maryland
+ggplot(predicted_df_md, aes(x = date)) +
+  geom_line(aes(y = confirmed, color = "Actual")) +
+  geom_line(aes(y = fit, color = "Predicted")) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2, fill = "blue") +
+  labs(title = "Predicted vs Actual Confirmed Cases in Maryland", y = "Confirmed Cases per 1,000", x = "Date") +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual" = "red", "Predicted" = "blue"))
+
+```
+
+```{R}
+# Predict for New York
+predictions_ny <- predict(model_ca, newdata = new_york_data, interval = "prediction")
+rmse_ny <- sqrt(mean((new_york_data$confirmed - predictions_ny[, "fit"])^2))
+cat("RMSE for New York: ", rmse_ny, "\n")
+predicted_df_ny <- cbind(new_york_data, predictions_ny)
+
+# Plot predictions vs actual values for New York
+ggplot(predicted_df_ny, aes(x = date)) +
+  geom_line(aes(y = confirmed, color = "Actual")) +
+  geom_line(aes(y = fit, color = "Predicted")) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.2, fill = "blue") +
+  labs(title = "Predicted vs Actual Confirmed Cases in New York", y = "Confirmed Cases per 1,000", x = "Date") +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual" = "red", "Predicted" = "blue"))
+
+```
+
+For comparison, The RMSE of Maryland is 3278.314, while the RMSE of New York is 1761.337. Although the prediction of New York based on the situation of California is much better than the prediction of Maryland, both predictions deviate a lot from the actual data. This means that although variant and vaccination rate can be combined to well predict the confirmed cases, but this is only true for a specific region, like for a state or for a country as a whole. We cannot use the model trained by one state to predict the other, because of the difference that lies within the population base and/or policies enforced within that region. 
+
+
+## Conclusion
+the vaccination is effective in controlling the pandemic.
+
+However, there are also other factors like variants of the virus that play a crucial roles in determining the future confirmed cases. When combined, vaccination rate and variants can be a good predictor of the confirmed cases.
+
+Last but not least, the situation is different from state to state. Thus, we cannot use the model train by one state to predict other states without the assumption that ensure the high similarity between the state that was used to predict and the state that was actually predicted.
+
+```{R}
+```
+## Reference
